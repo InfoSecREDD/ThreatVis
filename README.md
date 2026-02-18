@@ -56,8 +56,8 @@ cp config.example.json config.json
 - `ui_host`: dashboard bind host (default `"0.0.0.0"`).
 - `ui_port`: dashboard HTTP port (default `8080`).
 - `max_events`: maximum number of recent events kept in memory for the dashboard.
-- `reporting_enabled`: `true` or `false`. When `false`, the honeypot still captures and stores events locally for the dashboard, but **does not** send any data to the Threat Reporter server (local/anonymous mode).
-- `broadcast_location`: `true` or `false`. When `true`, the client will set a flag in each report so the central server can treat this honeypot as broadcasting its approximate location on the Threats globe.
+- `reporting_enabled`: `true` or `false`. When `false`, the honeypot still captures and stores events locally for the dashboard, but **does not** send any data to the Threat Reporter server (local/anonymous mode). (OPTIONAL)
+- `broadcast_location`: `true` or `false`. When `true`, the client will set a flag in each report so the central server can treat this honeypot as broadcasting its approximate location on the Threats globe. (OPTIONAL)
 - `max_listen_ports`: safety cap for how many ports are actually bound when `mode` is `"all"` (defaults to `1000`). Raise this only if you also raise the OS `ulimit -n`.
 
 > Note: Listening on all ports can be resource-intensive. For production, consider using `"list"` mode with a curated set of high-value ports.
