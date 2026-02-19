@@ -31,6 +31,282 @@ CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 DB_PATH = os.path.join(BASE_DIR, "honeypot.db")
 
 
+PORT_PROTOCOL: Dict[int, str] = {
+  # Well-known login and infra services (privileged ports)
+  20: "FTP-Data",
+  21: "FTP",
+  22: "SSH",
+  23: "Telnet",
+  25: "SMTP",
+  53: "DNS",
+  67: "DHCP-Server",
+  68: "DHCP-Client",
+  69: "TFTP",
+  80: "HTTP",
+  88: "Kerberos",
+  110: "POP3",
+  119: "NNTP",
+  123: "NTP",
+  135: "MSRPC",
+  137: "NetBIOS-NS",
+  138: "NetBIOS-DGM",
+  139: "NetBIOS-SSN",
+  143: "IMAP",
+  161: "SNMP",
+  389: "LDAP",
+  443: "HTTPS",
+  445: "SMB",
+  465: "SMTPS",
+  514: "Syslog",
+  587: "Submission",
+  631: "IPP",
+  636: "LDAPS",
+  873: "rsync",
+  993: "IMAPS",
+  995: "POP3S",
+  990: "FTPS",
+  1433: "MSSQL",
+  1521: "Oracle",
+  1723: "PPTP",
+  1812: "RADIUS-Auth",
+  1813: "RADIUS-Acct",
+  2049: "NFS",
+  27017: "MongoDB",
+  27018: "MongoDB",
+  27019: "MongoDB",
+  3306: "MySQL",
+  3389: "RDP",
+  4333: "MySQL-Alt",
+  5432: "PostgreSQL",
+  5900: "VNC",
+  5984: "CouchDB",
+  6379: "Redis",
+  500: "ISAKMP",
+  4500: "IPsec-NAT-T",
+  5060: "SIP",
+  5061: "SIPS",
+  8000: "HTTP-Alt",
+  8008: "HTTP-Alt",
+  8080: "HTTP-Proxy",
+  8081: "HTTP-Alt",
+  8083: "HTTP-Alt",
+  8086: "HTTP-Alt",
+  8088: "HTTP-Alt",
+  8090: "HTTP-Alt",
+  8181: "HTTP-Alt",
+  8222: "HTTP-Alt",
+  8243: "HTTPS-Alt",
+  8280: "HTTP-Alt",
+  8333: "Bitcoin",
+  8443: "HTTPS-Alt",
+  8530: "WSUS",
+  8531: "WSUS-SSL",
+  8554: "RTSP",
+  8834: "Nessus",
+  8880: "HTTP-Alt",
+  8883: "MQTTS",
+  8888: "HTTP-Alt",
+  9000: "HTTP-Alt",
+  9042: "Cassandra",
+  9060: "IBM-DB2",
+  9090: "HTTP-Alt",
+  9091: "HTTP-Alt",
+  9200: "Elasticsearch",
+  9300: "Elasticsearch-Node",
+  9418: "Git",
+  9443: "HTTPS-Alt",
+  11211: "Memcached",
+  15672: "RabbitMQ",
+  25565: "Minecraft",
+  27015: "SourceGame",
+  27016: "SourceGame",
+  27960: "Quake3",
+}
+
+
+def _protocol_for_port(port: int) -> str:
+  try:
+    return PORT_PROTOCOL.get(int(port), f"TCP/{int(port)}")
+  except Exception:
+    return f"TCP/{port}"
+
+
+async def _send_deceptive_response(writer: asyncio.StreamWriter, port: int, data: bytes) -> None:
+  proto = _protocol_for_port(port)
+  text = ""
+  try:
+    text = data[:512].decode("utf-8", errors="replace")
+  except Exception:
+    text = ""
+  lower = text.lower()
+
+  try:
+    if proto == "SSH":
+      writer.write(b"SSH-2.0-OpenSSH_8.2p1 Ubuntu-4ubuntu0.5\r\n")
+      await writer.drain()
+      return
+
+    if proto == "LDAP":
+      writer.write(b"version: 3\n")
+      await writer.drain()
+      return
+
+    if proto == "SIP":
+      writer.write(
+        b"SIP/2.0 200 OK\r\n"
+        b"Server: Asterisk PBX\r\n"
+        b"Content-Length: 0\r\n\r\n"
+      )
+      await writer.drain()
+      return
+
+    if proto == "Minecraft":
+      writer.write("§1\0\0A Minecraft Server\n".encode("utf-8", errors="ignore"))
+      await writer.drain()
+      return
+
+    if proto == "SourceGame":
+      writer.write(b"Source Engine Query\n")
+      await writer.drain()
+      return
+
+    if proto == "Quake3":
+      writer.write(b"\xff\xff\xff\xffprint\nQuake 3 Server\n")
+      await writer.drain()
+      return
+
+    if "http" in proto.lower() or lower.startswith(("get ", "post ", "head ", "put ", "delete ", "options ")):
+      if "authorization:" in lower or "login" in lower or "signin" in lower:
+        writer.write(
+          b"HTTP/1.1 401 Unauthorized\r\n"
+          b"WWW-Authenticate: Basic realm=\"Restricted\"\r\n"
+          b"Content-Length: 0\r\n"
+          b"Connection: close\r\n\r\n"
+        )
+      else:
+        first_line = text.splitlines()[0] if text.splitlines() else ""
+        path = "/"
+        try:
+          parts = first_line.split()
+          if len(parts) >= 2:
+            path = parts[1]
+        except Exception:
+          path = "/"
+
+        body_str: str
+        if "wp-login.php" in path or "wp-admin" in path or "wp-content" in path or "xmlrpc.php" in path:
+          body_str = (
+            "<!DOCTYPE html>"
+            "<html><head>"
+            "<meta charset=\"UTF-8\">"
+            "<title>Log In &lsaquo; My Blog &#8212; WordPress</title>"
+            "<meta name=\"generator\" content=\"WordPress 5.8.1\" />"
+            "</head>"
+            "<body class=\"login login-action-login wp-core-ui\">"
+            "<div id=\"login\">"
+            "<h1><a href=\"https://wordpress.org/\" tabindex=\"-1\">Powered by WordPress</a></h1>"
+            "<form name=\"loginform\" id=\"loginform\" action=\"/wp-login.php\" method=\"post\">"
+            "<p><label for=\"user_login\">Username or Email Address<br />"
+            "<input type=\"text\" name=\"log\" id=\"user_login\" class=\"input\" value=\"\" size=\"20\"></label></p>"
+            "<p><label for=\"user_pass\">Password<br />"
+            "<input type=\"password\" name=\"pwd\" id=\"user_pass\" class=\"input\" value=\"\" size=\"20\"></label></p>"
+            "<p class=\"submit\"><input type=\"submit\" name=\"wp-submit\" id=\"wp-submit\" class=\"button button-primary button-large\" value=\"Log In\"></p>"
+            "</form>"
+            "<p id=\"backtoblog\"><a href=\"/\">&larr; Go to My Blog</a></p>"
+            "</div>"
+            "</body></html>"
+          )
+        elif "phpmyadmin" in path or ".php" in path:
+          body_str = (
+            "<!DOCTYPE html>"
+            "<html><head>"
+            "<meta charset=\"utf-8\">"
+            "<title>phpMyAdmin</title>"
+            "</head><body>"
+            "<h1>Welcome to phpMyAdmin</h1>"
+            "<p>Version 4.9.7</p>"
+            "</body></html>"
+          )
+        else:
+          body_str = (
+            "<html><head><title>Welcome</title></head>"
+            "<body><h1>It works!</h1><p>Service ready.</p></body></html>"
+          )
+
+        body = body_str.encode("utf-8", errors="ignore")
+        headers = (
+          b"HTTP/1.1 200 OK\r\n"
+          b"Server: Apache/2.4.49 (Ubuntu)\r\n"
+          b"Content-Type: text/html; charset=utf-8\r\n"
+          + f"Content-Length: {len(body)}\r\n".encode("ascii", errors="ignore")
+          + b"Connection: close\r\n\r\n"
+        )
+        writer.write(headers + body)
+      await writer.drain()
+      return
+
+    if proto == "FTP" or proto == "Telnet":
+      if "user " in lower or "pass " in lower:
+        writer.write(b"530 Login incorrect.\r\n")
+      else:
+        writer.write(b"220 ProFTPD 1.3.5a Server ready.\r\n")
+      await writer.drain()
+      return
+
+    if proto == "SMTP":
+      if "auth" in lower or "login" in lower:
+        writer.write(b"535 5.7.8 Authentication credentials invalid\r\n")
+      else:
+        writer.write(b"220 mail.example.com ESMTP Postfix\r\n")
+      await writer.drain()
+      return
+
+    if proto in ("IMAP", "POP3"):
+      if "login" in lower or "auth" in lower or "pass " in lower:
+        writer.write(b"-ERR Authentication failed.\r\n")
+      else:
+        if proto == "IMAP":
+          writer.write(b"* OK [CAPABILITY IMAP4rev1] Dovecot ready.\r\n")
+        else:
+          writer.write(b"+OK POP3 server ready\r\n")
+      await writer.drain()
+      return
+
+    if proto == "Redis":
+      if "auth" in lower:
+        writer.write(b"-WRONGPASS invalid username-password pair\r\n")
+      else:
+        writer.write(b"+PONG\r\n")
+      await writer.drain()
+      return
+
+    if proto == "Memcached":
+      writer.write(b"STORED\r\n")
+      await writer.drain()
+      return
+
+    if proto in ("MySQL", "PostgreSQL"):
+      writer.write(b"Access denied for user (using password: YES)\n")
+      await writer.drain()
+      return
+
+    if proto == "MongoDB":
+      writer.write(b"Authentication failed.\n")
+      await writer.drain()
+      return
+
+    if any(k in lower for k in ("user", "pass", "login", "auth")):
+      writer.write(b"Authentication failed.\n")
+      await writer.drain()
+      return
+
+    msg = f"Service ready on port {port}\n".encode("utf-8", errors="ignore")
+    writer.write(msg)
+    await writer.drain()
+  except Exception:
+    return
+
+
 @dataclass
 class HoneypotEvent:
   timestamp: int
@@ -39,6 +315,10 @@ class HoneypotEvent:
   protocol: str
   bytes_received: int
   preview: str
+  hex_sample: Optional[str] = None
+  base64_sample: Optional[str] = None
+  printable_ratio: Optional[float] = None
+  has_null_bytes: Optional[bool] = None
   lat: Optional[float] = None
   lon: Optional[float] = None
 
@@ -54,6 +334,15 @@ class HoneypotEvent:
       "reason": "honeypot",
       "details": f"{self.protocol} connection captured by honeypot on port {self.port} ({self.bytes_received} bytes)",
     }
+
+    if self.hex_sample:
+      payload["hexSample"] = self.hex_sample
+    if self.base64_sample:
+      payload["base64Sample"] = self.base64_sample
+    if self.printable_ratio is not None:
+      payload["printableRatio"] = float(self.printable_ratio)
+    if self.has_null_bytes is not None:
+      payload["hasNullBytes"] = bool(self.has_null_bytes)
 
     if self.lat is not None and self.lon is not None:
       try:
@@ -154,6 +443,10 @@ class HoneypotServer:
           protocol TEXT NOT NULL,
           bytes_received INTEGER NOT NULL,
           preview TEXT,
+          hex_sample TEXT,
+          base64_sample TEXT,
+          printable_ratio REAL,
+          has_null_bytes INTEGER,
           lat REAL,
           lon REAL
         )
@@ -165,14 +458,20 @@ class HoneypotServer:
       cur.execute(
         "CREATE INDEX IF NOT EXISTS idx_honeypot_events_ip ON honeypot_events(ip)"
       )
-      try:
-        cur.execute("ALTER TABLE honeypot_events ADD COLUMN lat REAL")
-      except Exception:
-        pass
-      try:
-        cur.execute("ALTER TABLE honeypot_events ADD COLUMN lon REAL")
-      except Exception:
-        pass
+
+      # Migrations for older DBs that may miss newer columns.
+      for ddl in [
+        "ALTER TABLE honeypot_events ADD COLUMN lat REAL",
+        "ALTER TABLE honeypot_events ADD COLUMN lon REAL",
+        "ALTER TABLE honeypot_events ADD COLUMN hex_sample TEXT",
+        "ALTER TABLE honeypot_events ADD COLUMN base64_sample TEXT",
+        "ALTER TABLE honeypot_events ADD COLUMN printable_ratio REAL",
+        "ALTER TABLE honeypot_events ADD COLUMN has_null_bytes INTEGER",
+      ]:
+        try:
+          cur.execute(ddl)
+        except Exception:
+          continue
       self._db_conn.commit()
 
   def _lookup_geo(self, ip: str) -> tuple[Optional[float], Optional[float]]:
@@ -213,7 +512,7 @@ class HoneypotServer:
       with self._db_lock:
         cur = self._db_conn.cursor()
         cur.execute(
-          "INSERT INTO honeypot_events (timestamp_ms, ip, port, protocol, bytes_received, preview, lat, lon) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+          "INSERT INTO honeypot_events (timestamp_ms, ip, port, protocol, bytes_received, preview, hex_sample, base64_sample, printable_ratio, has_null_bytes, lat, lon) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
           (
             int(event.timestamp),
             event.ip,
@@ -221,6 +520,10 @@ class HoneypotServer:
             event.protocol,
             int(event.bytes_received),
             event.preview,
+            event.hex_sample,
+            event.base64_sample,
+            float(event.printable_ratio) if event.printable_ratio is not None else None,
+            1 if event.has_null_bytes else 0 if event.has_null_bytes is not None else None,
             float(event.lat) if event.lat is not None else None,
             float(event.lon) if event.lon is not None else None,
           ),
@@ -265,7 +568,7 @@ class HoneypotServer:
       with self._db_lock:
         cur = self._db_conn.cursor()
         cur.execute(
-          "SELECT timestamp_ms, ip, port, protocol, bytes_received, preview, lat, lon "
+          "SELECT timestamp_ms, ip, port, protocol, bytes_received, preview, hex_sample, base64_sample, printable_ratio, has_null_bytes, lat, lon "
           "FROM honeypot_events ORDER BY timestamp_ms DESC LIMIT ?",
           (int(limit),),
         )
@@ -276,7 +579,20 @@ class HoneypotServer:
 
     for row in rows:
       try:
-        ts_ms, ip, port, protocol, bytes_received, preview, lat, lon = row
+        (
+          ts_ms,
+          ip,
+          port,
+          protocol,
+          bytes_received,
+          preview,
+          hex_sample,
+          base64_sample,
+          printable_ratio,
+          has_null_bytes,
+          lat,
+          lon,
+        ) = row
         ev = HoneypotEvent(
           timestamp=int(ts_ms),
           ip=str(ip),
@@ -284,6 +600,10 @@ class HoneypotServer:
           protocol=str(protocol),
           bytes_received=int(bytes_received),
           preview=str(preview) if preview is not None else "",
+          hex_sample=str(hex_sample) if hex_sample is not None else None,
+          base64_sample=str(base64_sample) if base64_sample is not None else None,
+          printable_ratio=float(printable_ratio) if printable_ratio is not None else None,
+          has_null_bytes=bool(has_null_bytes) if has_null_bytes is not None else None,
           lat=float(lat) if lat is not None else None,
           lon=float(lon) if lon is not None else None,
         )
@@ -415,33 +735,68 @@ class HoneypotServer:
       local_port = sock.getsockname()[1]
     except Exception:
       local_port = 0
+    chunks: List[bytes] = []
+    total = 0
+    max_bytes = 8192
+    overall_deadline = time.time() + 3.0
+    while total < max_bytes and time.time() < overall_deadline:
+      timeout = max(0.1, overall_deadline - time.time())
+      try:
+        chunk = await asyncio.wait_for(reader.read(1024), timeout=timeout)
+      except asyncio.TimeoutError:
+        break
+      if not chunk:
+        break
+      chunks.append(chunk)
+      total += len(chunk)
 
-    try:
-      data = await asyncio.wait_for(reader.read(1024), timeout=3.0)
-    except asyncio.TimeoutError:
-      data = b""
+    data = b"".join(chunks)
 
     self.total_connections += 1
 
     preview = ""
+    hex_sample: Optional[str] = None
+    base64_sample: Optional[str] = None
+    printable_ratio: Optional[float] = None
+    has_null_bytes: Optional[bool] = None
     if data:
       try:
-        preview = data.decode("utf-8", errors="replace")[:300]
+        preview = data[:1024].decode("utf-8", errors="replace")[:300]
       except Exception:
         preview = repr(data)[:300]
+
+      slice_bytes = data[:1024]
+      hex_sample = slice_bytes[:256].hex()
+      import base64 as _b64
+
+      base64_sample = _b64.b64encode(slice_bytes[:512]).decode("ascii", errors="replace")
+
+      window = slice_bytes[:200]
+      if window:
+        printable = sum(1 for b in window if 32 <= b <= 126)
+        printable_ratio = float(printable) / float(len(window))
+        has_null_bytes = any(b == 0 for b in window)
 
     event = HoneypotEvent(
       timestamp=int(time.time() * 1000),
       ip=str(ip),
       port=int(local_port),
-      protocol="TCP",
+      protocol=_protocol_for_port(int(local_port)),
       bytes_received=len(data),
       preview=preview,
+      hex_sample=hex_sample,
+      base64_sample=base64_sample,
+      printable_ratio=printable_ratio,
+      has_null_bytes=has_null_bytes,
     )
     self.events.appendleft(event)
 
     loop = asyncio.get_running_loop()
     loop.run_in_executor(None, self._handle_event_background, event)
+    try:
+      await _send_deceptive_response(writer, int(local_port), data)
+    except Exception:
+      pass
 
     try:
       writer.close()
@@ -474,7 +829,6 @@ class HoneypotServer:
     loop = asyncio.get_running_loop()
 
     for port in ports:
-      # TCP listener
       try:
         server = await asyncio.start_server(
           self.handle_client,
@@ -498,19 +852,39 @@ class HoneypotServer:
             self.parent.total_connections += 1
 
             preview = ""
+            hex_sample: Optional[str] = None
+            base64_sample: Optional[str] = None
+            printable_ratio: Optional[float] = None
+            has_null_bytes: Optional[bool] = None
             if data:
               try:
-                preview = data.decode("utf-8", errors="replace")[:300]
+                preview = data[:1024].decode("utf-8", errors="replace")[:300]
               except Exception:
                 preview = repr(data)[:300]
+
+              slice_bytes = data[:1024]
+              hex_sample = slice_bytes[:256].hex()
+              import base64 as _b64
+
+              base64_sample = _b64.b64encode(slice_bytes[:512]).decode("ascii", errors="replace")
+
+              window = slice_bytes[:200]
+              if window:
+                printable = sum(1 for b in window if 32 <= b <= 126)
+                printable_ratio = float(printable) / float(len(window))
+                has_null_bytes = any(b == 0 for b in window)
 
             event = HoneypotEvent(
               timestamp=int(time.time() * 1000),
               ip=str(ip),
               port=int(self.local_port),
-              protocol="UDP",
+              protocol=_protocol_for_port(int(self.local_port)),
               bytes_received=len(data),
               preview=preview,
+              hex_sample=hex_sample,
+              base64_sample=base64_sample,
+              printable_ratio=printable_ratio,
+              has_null_bytes=has_null_bytes,
             )
             self.parent.events.appendleft(event)
 
@@ -1324,6 +1698,35 @@ def create_app(honeypot: HoneypotServer) -> FastAPI:
       }
     }
 
+    function sanitizePreview(input) {
+      if (!input) return '';
+      let out = '';
+      for (let i = 0; i < input.length; i++) {
+        const ch = input[i];
+        const code = ch.charCodeAt(0);
+        // Keep basic printable ASCII; normalize common whitespace to space.
+        if (code >= 32 && code <= 126) {
+          out += ch;
+        } else if (ch === ' ') {
+          out += ' ';
+        } else if (ch === '\\n' || ch === '\\r' || ch === '\\t') {
+          out += ' ';
+        } else {
+          // Non-printable / binary bytes become a dot so they
+          // don't blow up the layout or show gibberish.
+          out += '.';
+        }
+      }
+      out = out.replace(/\\s+/g, ' ').trim();
+      if (!out) return '';
+      const nonDot = out.replace(/\\./g, '').length;
+      const ratio = nonDot / out.length;
+      if (ratio < 0.2) {
+        return `[binary payload, ${input.length} bytes]`;
+      }
+      return out;
+    }
+
     async function fetchEvents() {
       try {
         const res = await fetch('/api/events');
@@ -1340,8 +1743,8 @@ def create_app(honeypot: HoneypotServer) -> FastAPI:
           const right = document.createElement('div');
 
           const ts = new Date(ev.timestamp).toLocaleTimeString();
-          const previewRaw = (ev.preview || '').replace(/\\s+/g, ' ').trim();
-          const preview = previewRaw || '<no payload>';
+          const previewSanitized = sanitizePreview(ev.preview || '');
+          const preview = previewSanitized || '<no payload>';
 
           const ipLine = document.createElement('div');
           ipLine.className = 'mono';
